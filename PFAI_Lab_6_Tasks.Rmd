@@ -1,0 +1,160 @@
+---
+title: "PFAI Lab 7"
+author: "Mohsin Pervaiz"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 1. Install and Load Required Packages
+
+```{r setup, message=FALSE, warning=FALSE}
+# Install packages if not already installed
+# install.packages(c("ROSE", "DMwR2", "caret", "rpart", "ggplot2", "smotefamily", "pROC"))
+
+# Load each package with a comment describing its purpose
+library(smotefamily)   # For alternative SMOTE technique
+library(ROSE)          # For random oversampling to balance classes
+library(DMwR2)         # For SMOTE (if available)
+library(caret)         # For model training, cross-validation, and performance evaluation
+library(rpart)         # For training decision tree models
+library(ggplot2)       # For visualizations
+library(pROC)          # For ROC and AUC calculations
+```
+
+# 2. Check if Packages are Installed
+
+```{r}
+# Check which required packages are installed
+installed <- c("ROSE", "DMwR2", "caret", "rpart", "ggplot2", "UBL")
+installed[installed %in% rownames(installed.packages())]
+```
+
+# 3. Create Imbalanced Iris Dataset
+
+```{r}
+# Load Iris dataset and create imbalance
+data <- iris
+
+set.seed(53)  # Set seed for reproducibility
+
+# Keep only 20% of the setosa rows
+setosa_part <- data[data$Species == "setosa", ]
+setosa_sample <- setosa_part[sample(1:nrow(setosa_part), size = round(0.2 * nrow(setosa_part))), ]
+
+# Keep all rows from other two species
+non_setosa <- data[data$Species != "setosa", ]
+
+# Combine to create the imbalanced dataset
+imbalanced_data <- rbind(non_setosa, setosa_sample)
+
+# Convert to binary classification: Setosa (1) vs Others (0)
+binary_data <- imbalanced_data
+binary_data$Label <- ifelse(binary_data$Species == "setosa", 1, 0)
+binary_data$Species <- NULL  # Drop original species column
+
+# Check class distribution
+table(binary_data$Label)
+```
+
+# 4. Balance Dataset using Random Oversampling (ROSE)
+
+```{r}
+# Apply Random Oversampling to balance the classes
+set.seed(123)
+
+rose_balanced <- ovun.sample(Label ~ ., data = binary_data, method = "both", N = 150)$data
+
+# Check the new class distribution
+table(rose_balanced$Label)
+```
+
+# 5. Train a Decision Tree Classifier
+
+```{r}
+# Train a decision tree classifier using the balanced dataset
+model <- rpart(Label ~ ., data = rose_balanced, method = "class")
+
+# Display model summary
+summary(model)
+
+# Plot the decision tree
+plot(model)
+text(model, use.n = TRUE, all = TRUE, cex = 0.8)
+```
+
+# 6. Evaluate Model Performance with Confusion Matrix
+
+```{r}
+# Obtain predictions
+predictions <- predict(model, rose_balanced, type = "class")
+
+# Convert predictions and actual labels to factors with same levels
+predictions <- factor(predictions, levels = c(0, 1))
+rose_balanced$Label <- factor(rose_balanced$Label, levels = c(0, 1))
+
+# Confusion matrix
+conf_matrix <- confusionMatrix(predictions, rose_balanced$Label)
+
+# Print confusion matrix
+print(conf_matrix)
+
+# Performance metrics
+paste("Accuracy: ", conf_matrix$overall['Accuracy'])
+paste("Sensitivity: ", conf_matrix$byClass['Sensitivity'])
+paste("Specificity: ", conf_matrix$byClass['Specificity'])
+```
+
+# 7. Visualize the Performance with ROC Curve and AUC
+
+```{r}
+# Predict probabilities for positive class
+probabilities <- predict(model, rose_balanced, type = "prob")
+
+# ROC Curve
+roc_curve <- roc(rose_balanced$Label, probabilities[,2])
+
+# Plot ROC curve
+plot(roc_curve, main = "ROC Curve for Decision Tree")
+
+# Print AUC
+paste("AUC: ", auc(roc_curve))
+```
+
+# 8. Tune the Decision Tree Model (Hyperparameter Tuning)
+
+```{r}
+# Define a grid for tuning
+tune_grid <- expand.grid(cp = seq(0.01, 0.1, by = 0.01))
+
+# Perform cross-validation to tune the model
+tuned_model <- train(Label ~ ., data = rose_balanced, method = "rpart", tuneGrid = tune_grid, trControl = trainControl(method = "cv"))
+
+# Best tuned parameter
+print(tuned_model$bestTune)
+
+# Retrain the model with best cp
+best_model <- rpart(Label ~ ., data = rose_balanced, method = "class", cp = tuned_model$bestTune$cp)
+
+# Evaluate the tuned model
+best_predictions <- predict(best_model, rose_balanced, type = "class")
+best_conf_matrix <- confusionMatrix(best_predictions, rose_balanced$Label)
+print(best_conf_matrix)
+```
+
+# 9. Feature Importance using varImp()
+
+```{r}
+# Calculate feature importance
+feature_importance <- varImp(model, scale = FALSE)
+
+# Print feature importance
+print(feature_importance)
+```
+
+# 10. Final Plot of Decision Tree
+
+```{r}
+# Plot the decision tree again for final visualization
+plot(model)
+text(model, use.n = TRUE, all = TRUE, cex = 0.8)
+```
